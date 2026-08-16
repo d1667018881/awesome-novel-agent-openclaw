@@ -508,7 +508,7 @@ Reasonix 项目把 agent 定义以 skill 形式部署在 `.reasonix/skills/`，�
 在 Codex 中打开目标目录，输入 `/use awesome-novel`（或说"帮我写本小说"），skill 会自动初始化；也可手动运行：
 
 ```bash
-python ~/.codex/skills/awesome-novel/tools/init.py <小说项目路��后 9 个自定义 agent 以 Codex 官方 TOML 格式部署到项目 `.codex/agents/*.toml`（`name` / `description` / `developer_instructions`），独立交互工具（memory-recording、roleplay-sandbox）部署为 `.codex/skills/<name>/SKILL.md`，反 AI 规则、文风偏好、格式规范与写作记忆分别落在 `.codex/knowledge/`、`.codex/memory/`。
+python ~/.codex/skills/awesome-novel/tools/init.py <小说项目路径后 9 个自定义 agent 以 Codex 官方 TOML 格式部署到项目 `.codex/agents/*.toml`（`name` / `description` / `developer_instructions`），独立交互工具（memory-recording、roleplay-sandbox）部署为 `.codex/skills/<name>/SKILL.md`，反 AI 规则、文风偏好、格式规范与写作记忆分别落在 `.codex/knowledge/`、`.codex/memory/`。
 
 ### 开始写作
 
