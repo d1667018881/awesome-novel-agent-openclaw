@@ -14,7 +14,7 @@
   <br>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPL%203.0-blue?style=flat-square" alt="GPL 3.0"></a>
   <br>
-  <a href="#加入交流群"><img src="https://img.shields.io/badge/QQ%E4%BA%A4%E6%B5%81%E7%BE%A4-1006050538-12B7F5?style=flat-square" alt="QQ交流群 1006050538"></a>
+  <a href="#加入交流群"><img src="https://img.shields.io/badge/QQ%E4%BA%A4%E6%B5%81%E7%BE%A4-1006050538-12B7F5?style=flat-square" alt="QQ交流群"></a>
 </p>
 
 > **个人使用免费** — 本 Skill 对个人用户完全免费。<br>
@@ -26,7 +26,7 @@
 
 遇到问题、交流写作心得、催更或提建议，欢迎进群，作者常在。
 
-> **QQ 交流群 2群：`1006050538`**
+> **QQ 交流群 2群：``**
 > 进群后可直接提问，或和大伙儿分享你写的小说。
 
 <!-- 开篇示例：修仙小说节选 + 配图 -->
@@ -64,7 +64,7 @@
 > **如果这个项目对你有帮助，可以请我喝杯咖啡 ☕**  
 > 一杯咖啡，不是合同。不影响 issue 优先级和功能方向。
 >
-> <img src="reference/images/wechat-pay.jpg" width="200" alt="微信收款码" style="border-radius:8px;box-shadow:0 2px 12px rgba(0,0,0,0.1)">
+> <img src="" width="200" alt="微信收款码" style="border-radius:8px;box-shadow:0 2px 12px rgba(0,0,0,0.1)">
 
 ---
 
