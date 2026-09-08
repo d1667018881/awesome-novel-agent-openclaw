@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-awesome-novel-skill 项目初始化工具
+awesome-novel-agent 项目初始化工具
 
-用法: python init.py [project-path] [--genre <编号>] [--platform <claude|opencode|reasonix|codex|zcode|openclaw>]
+用法: python init.py [project-path] [--genre <编号>] [--platform <claude|opencode|reasonix|codex|zcode|dsh|grok|openclaw>]
 
 平台缺省：--platform > NOVEL_PLATFORM > SKILL_HOME 路径识别 > claude。
 
@@ -20,13 +20,11 @@ from pathlib import Path
 
 from platforms import (
     Platform,
-    convert_to_opencode,
+    convert_agent_to_platform,
     detect_platform,
     deploy_codex_agents,
     deploy_codex_skills,
-    deploy_openclaw_skills,
-    deploy_reasonix_skills,
-    deploy_zcode_skills,
+    deploy_inline_skills,
     ensure_yaml,
     rewrite_refs,
     resolve_skill_home,
@@ -81,6 +79,12 @@ GENRE_LABELS = {
     "male-derivative": "男频衍生",
 }
 
+# 反 AI 规则跨题材复用（对应题材文件头部「适用题材」注释声明，缺同名文件属有意设计）
+_ANTI_AI_REUSE = {
+    "urban-cultivation": "urban-brained",
+    "urban-high-martial": "urban-brained",
+}
+
 SKILL_HOME = resolve_skill_home()
 
 SOURCE_AGENTS = SKILL_HOME / "agents"
@@ -105,7 +109,7 @@ def main():
         a = args[i]
         if a == "--platform":
             if i + 1 >= len(args) or args[i + 1].startswith("--"):
-                print("错误: --platform 需要一个平台名（claude|opencode|reasonix|codex|zcode|openclaw）")
+                print("错误: --platform 需要一个平台名（claude|opencode|reasonix|codex|zcode|dsh|grok|openclaw）")
                 sys.exit(1)
             platform_override = args[i + 1]
             i += 2
@@ -153,6 +157,10 @@ def main():
         genre = select_genre()
     else:
         print(f"题材: {GENRE_LABELS.get(genre, genre)}（{genre}）")
+    gaps = _genre_gaps(genre)
+    if gaps:
+        print(f"  ⚠️ 该题材知识库不完整：{'、'.join(gaps)}"
+              f"（选题列表中标 ⚠️ 的题材同样存在缺口，设定阶段需作者补全）")
 
     # Step 1.5: 旧 4 字段 writing-style.md → 新格式（必须先于模板拷贝/题材预填，否则旧卡被覆盖）
     migrate_writing_style(project_path)
@@ -160,24 +168,23 @@ def main():
     # Step 2: 创建骨架
     create_skeleton(project_path, platform)
 
-    # Step 3: 部署 agent 定义（codex 为 TOML 转换产物，reasonix/zcode agents 即 skills）
+    # Step 3: 部署 agent 定义（codex 为 TOML 转换产物，reasonix/zcode/dsh agents 即 skills）
     if platform.key == "codex":
         deploy_codex_agents(project_path, SKILL_HOME, platform)
     else:
         deploy_agents(project_path, platform)
 
-    # Step 3.5: 部署平台 skills（reasonix/zcode/openclaw 生成 11 个 SKILL.md；codex 只部署独立工具）
-    if platform.key == "reasonix":
-        deploy_reasonix_skills(project_path, SKILL_HOME, platform)
-    elif platform.key == "zcode":
-        deploy_zcode_skills(project_path, SKILL_HOME, platform)
-    elif platform.key == "openclaw":
-        deploy_openclaw_skills(project_path, SKILL_HOME, platform)
-    elif platform.key == "codex":
+    # Step 3.5: 部署平台 skills（reasonix/zcode/dsh 生成 11 个 SKILL.md；codex/grok 只部署独立工具）
+    if platform.key in ("codex", "grok"):
         deploy_codex_skills(project_path, SKILL_HOME, platform)
+    else:
+        deploy_inline_skills(project_path, SKILL_HOME, platform)   # 非 inline 平台内部自跳过
 
     # Step 4: 按题材继承知识
     deploy_knowledge(project_path, genre, platform)
+
+    # Step 4.5: 部署正文检查脚本（anti-ai 机器初筛用，缺省降级为模型肉眼）
+    deploy_tools(project_path, platform)
 
     # Step 5.5: 按题材预填 settings 默认值
     seed_settings_from_genre(project_path, genre, platform)
@@ -201,17 +208,37 @@ def main():
         print("在 Codex 中打开项目目录，调用 @novel-agent 开始写作")
     elif platform.key == "zcode":
         print("在 ZCode 中打开项目目录，说“帮我写本小说”或调用 novel-agent skill 开始写作")
+    elif platform.key == "dsh":
+        print("在 DeepSeek Harness（dsh）中打开项目目录，说“帮我写本小说”或调用 novel-agent skill 开始写作")
+    elif platform.key == "grok":
+        print("在 Grok Build 中打开项目目录，输入 /awesome-novel 或说“帮我写本小说”开始写作")
     elif platform.key == "openclaw":
         print("在 OpenClaw / 云养虾（ArkClaw）中打开项目目录，说“帮我写本小说”开始写作")
     else:
         print("在 Reasonix 中运行 `reasonix code`，然后调用 @novel-agent 开始写作")
 
 
+def _genre_gaps(genre: str) -> list:
+    """题材支持缺口（知识库文件缺失）→ 缺口标签列表，空 = 完整。
+
+    反 AI 规则允许跨题材复用（见 _ANTI_AI_REUSE 对应文件「适用题材」注释）。
+    选题列表标注与部署警告共用，避免静默选到空壳题材。
+    """
+    gaps = []
+    if not (SOURCE_GENRE_EXAMPLE / f"{genre}.md").exists():
+        gaps.append("题材档案待补")
+    if genre not in _ANTI_AI_REUSE and not (SOURCE_ANTI_AI / f"{genre}.md").exists():
+        gaps.append("反AI规则待补")
+    return gaps
+
+
 def select_genre() -> str:
-    """交互式选题材"""
+    """交互式选题材（知识库不完整的题材标注缺口，防止静默选到空壳）"""
     print("\n可选题材:")
     for i, g in enumerate(GENRES, 1):
-        print(f"  {i:2d}. {GENRE_LABELS[g]}（{g}）")
+        gaps = _genre_gaps(g)
+        mark = f"　⚠️ {'、'.join(gaps)}" if gaps else ""
+        print(f"  {i:2d}. {GENRE_LABELS[g]}（{g}）{mark}")
 
     while True:
         try:
@@ -231,19 +258,23 @@ def _rewrite_template_refs(text: str, platform: Platform) -> str:
     if platform.key == "reasonix":
         text = text.replace(".claude/agents/", ".reasonix/skills/")
         text = text.replace(".opencode/agents/", ".reasonix/skills/")
-    elif platform.key == "zcode":
-        text = text.replace(".claude/agents/", ".zcode/skills/")
-        text = text.replace(".opencode/agents/", ".zcode/skills/")
+    elif platform.key == "dsh":
+        text = text.replace(".claude/agents/", ".dsh/skills/")
+        text = text.replace(".opencode/agents/", ".dsh/skills/")
+    elif platform.key in ("zcode", "openclaw"):
+        text = text.replace(".claude/agents/", f".{platform.key}/skills/")
+        text = text.replace(".opencode/agents/", f".{platform.key}/skills/")
     elif platform.key == "codex":
         text = text.replace(".claude/agents/", ".codex/agents/")
         text = text.replace(".opencode/agents/", ".codex/agents/")
-    else:  # opencode
+    else:  # opencode / grok 等独立 agents 目录
         text = text.replace(".claude/agents/", f"{platform.root}/agents/")
+        text = text.replace(".opencode/agents/", f"{platform.root}/agents/")
     return rewrite_refs(text, platform)
 
 
 # 根级脚手架（平台 agent 配置/模板生成物）随模板刷新；settings/ 等用户内容保留不覆盖
-_GENERATED_SCAFFOLD = {"CLAUDE.md", "AGENTS.md", "AGENTS.codex.md"}
+_GENERATED_SCAFFOLD = {"CLAUDE.md", "AGENTS.md", "AGENTS.codex.md", "AGENTS.openclaw.md"}
 
 
 def create_skeleton(project_path: Path, platform: Platform):
@@ -319,7 +350,6 @@ def deploy_agents(project_path: Path, platform: Platform):
         print(f"  ℹ️  {platform.label} 平台不部署 agent 定义（agents 即 {platform.root}/skills/）")
         return
     agent_dir.mkdir(parents=True, exist_ok=True)
-    is_opencode = platform.key == "opencode"
     for item in SOURCE_AGENTS.rglob("*"):
         if item.is_file() and item.suffix == ".md":
             rel_path = item.relative_to(SOURCE_AGENTS)
@@ -328,12 +358,26 @@ def deploy_agents(project_path: Path, platform: Platform):
             if not dest.resolve().is_relative_to(agent_dir.resolve()):
                 continue
             dest.parent.mkdir(parents=True, exist_ok=True)
-            content = item.read_text(encoding="utf-8")
-            if is_opencode:
-                content = convert_to_opencode(content)
-                content = rewrite_refs(content, platform)
+            content = convert_agent_to_platform(
+                item.read_text(encoding="utf-8"), platform, SKILL_HOME)
             dest.write_text(content, encoding="utf-8")
     print(f"  ✅ 已部署 agent 定义到 {agent_dir}")
+
+
+def deploy_tools(project_path: Path, platform: Platform):
+    """部署正文检查脚本到 <平台>/tools/（anti-ai 机器初筛与章节交付检查用，缺省降级为模型肉眼）"""
+    dst_dir = project_path / platform.root / "tools"
+    dst_dir.mkdir(parents=True, exist_ok=True)
+    for name, missing_hint in (
+        ("check-prose.py", "anti-ai 机器初筛将降级为模型肉眼"),
+        ("check-chapter.py", "章节交付硬伤检查不可用"),
+    ):
+        src = SKILL_HOME / "tools" / name
+        if not src.exists():
+            print(f"  ⚠️  缺 tools/{name}——{missing_hint}")
+            continue
+        shutil.copy2(src, dst_dir / name)
+        print(f"  ✅ 已部署正文检查脚本（{platform.root}/tools/{name}）")
 
 
 def deploy_knowledge(project_path: Path, genre: str, platform: Platform):
@@ -352,13 +396,19 @@ def deploy_knowledge(project_path: Path, genre: str, platform: Platform):
     if genre_example_src.exists():
         shutil.copy2(genre_example_src, knowledge_dir / "genre-example.md")
         count += 1
+    else:
+        print(f"  ⚠️  缺题材档案 knowledge/genre-example/{genre}.md——"
+              f"不生成 genre-example.md，settings 保留占位（请在设定阶段与作者补全）")
 
-    # 反 AI 规则：通用 + 题材 + 方法论 + 误杀防护（合并为单个 anti-ai.md）
-    # 注：common-rules / anti-ai-writing / boundary-cases 是 anti-ai agent 的三个必需输入，
-    #     统一合并进 .claude/knowledge/anti-ai.md，避免部署后多个失效路径。
+    # 反 AI 规则：正向方法 + 通用 + 题材 + 方法论 + 误杀防护 + 结构热源（合并为单个 anti-ai.md）
+    # 注：living-voice / common-rules / anti-ai-writing / boundary-cases / structural-heat
+    #     是 anti-ai agent 的必需输入，统一合并进 .claude/knowledge/anti-ai.md，
+    #     避免部署后多个失效路径。
+    #     living-voice 排最前：正向方法论（先讲写成什么样）置顶，禁用表随后。
     anti_ai_content = []
     anti_ai_content.append("# 反 AI 规则\n\n[community-defaults]\n")
-    for fname in ("common-rules.md", "anti-ai-writing.md", "boundary-cases.md"):
+    for fname in ("living-voice.md", "common-rules.md", "anti-ai-writing.md",
+                  "boundary-cases.md", "structural-heat.md"):
         f = SOURCE_ANTI_AI / fname
         if f.exists():
             anti_ai_content.append(f"\n---\n\n{f.read_text(encoding='utf-8')}")
@@ -367,6 +417,17 @@ def deploy_knowledge(project_path: Path, genre: str, platform: Platform):
     if genre_rules.exists():
         anti_ai_content.append(f"\n---\n\n[community-defaults] 题材: {genre}\n")
         anti_ai_content.append(genre_rules.read_text(encoding="utf-8"))
+    elif genre in _ANTI_AI_REUSE:
+        reuse = _ANTI_AI_REUSE[genre]
+        anti_ai_content.append(
+            f"\n---\n\n[community-defaults] 题材: {genre}（复用 {reuse}.md 规则）\n"
+        )
+        anti_ai_content.append(
+            (SOURCE_ANTI_AI / f"{reuse}.md").read_text(encoding="utf-8")
+        )
+    else:
+        print(f"  ⚠️  缺题材反 AI 规则 knowledge/anti-ai/{genre}.md——仅继承通用规则"
+              f"（选到该题材时反 AI 检测无题材正反例）")
 
     if anti_ai_content:
         (knowledge_dir / "anti-ai.md").write_text(
@@ -631,7 +692,7 @@ def write_status(project_path: Path):
     """初始化 .agent/status.md"""
     status = """# 项目状态
 
-- **skill_version:** 4.13.0
+- **skill_version:** 4.24.1
 - **phase:** setup
 - **current_step:** setting        # volume-planning / chapter-planning / prompt-crafting / writing / anti-ai / reviewing / archiving
 # phase 取值：setup / outline / draft / anti-ai / review / archive / finished
@@ -688,12 +749,6 @@ def init_memory_files(project_path: Path, platform: Platform):
             filepath.write_text(content, encoding="utf-8")
     print("  \u2705 \u5df2\u521d\u59cb\u5316 4 \u4e2a\u5199\u4f5c\u8bb0\u5fc6\u6587\u4ef6")
 
-
-
-
-
-if __name__ == "__main__":
-    main()
 
 
 

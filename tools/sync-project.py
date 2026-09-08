@@ -31,16 +31,12 @@ from pathlib import Path
 
 from platforms import (
     Platform,
-    convert_to_codex,
-    convert_to_opencode,
+    convert_agent_to_platform,
     detect_platform,
     deploy_codex_skills,
-    deploy_openclaw_skills,
-    deploy_reasonix_skills,
-    deploy_zcode_skills,
+    deploy_inline_skills,
     ensure_yaml,
     resolve_skill_home,
-    rewrite_refs,
 )
 
 for s in (sys.stdin, sys.stdout, sys.stderr):
@@ -73,7 +69,7 @@ def main():
         if idx + 1 < len(sys.argv) and not sys.argv[idx + 1].startswith("--"):
             platform_override = sys.argv[idx + 1]
         else:
-            print("错误: --platform 需要一个平台名（claude|opencode|reasonix|codex|zcode|openclaw）")
+            print("错误: --platform 需要一个平台名（claude|opencode|reasonix|codex|zcode|dsh|grok|openclaw）")
             sys.exit(1)
     platform_override = platform_override or os.environ.get("NOVEL_PLATFORM")
     try:
@@ -156,6 +152,11 @@ def compute_fingerprint() -> str:
         for f in sorted(tpl.rglob("*")):
             if f.is_file() and f.name != ".gitkeep" and "migration" not in f.parts and "settings" not in f.parts:
                 files.append(f)
+    # 正文检查脚本（sync_tools 部署范围；不进指纹则升级后存量项目拿不到脚本）
+    for name in ("check-prose.py", "check-chapter.py"):
+        tool = SKILL_HOME / "tools" / name
+        if tool.is_file():
+            files.append(tool)
 
     h = hashlib.sha256()
     for f in files:
@@ -219,7 +220,7 @@ def check_freshness(project: Path, platform: Platform):
         sys.exit(0)
     else:
         changes = find_changes(project, platform)
-        if not changes and platform.key in ("reasonix", "codex", "zcode", "openclaw"):
+        if not changes and platform.key in ("reasonix", "codex", "zcode", "dsh", "grok"):
             print("有更新可用（源文件变化，平台派生产物由同步时重新生成）。")
         elif not changes:
             # 指纹含风格资产（writing-style.md + style-profiles/**，line 143-149）而 find_changes 只扫
@@ -240,7 +241,7 @@ def check_freshness(project: Path, platform: Platform):
 
 
 def find_changes(project: Path, platform: Platform) -> list[str]:
-    """返回与源不同的文件列表（相对路径）。reasonix/zcode 的 skills 是派生产物，不枚举。"""
+    """返回与源不同的文件列表（相对路径）。reasonix/zcode/dsh 的 skills 是派生产物，不枚举。"""
     changed = []
     targets = {
         "agents": platform.agents_dir(project),
@@ -257,9 +258,9 @@ def find_changes(project: Path, platform: Platform) -> list[str]:
         src_dir = src_dirs[name]
         if dst_base is None or not src_dir.exists():
             continue
-        if platform.key in ("reasonix", "zcode", "openclaw") and name == "skills":
+        if platform.key in ("reasonix", "zcode", "dsh", "openclaw") and name == "skills":
             continue  # 派生产物靠源指纹检测，同步时重新生成
-        if platform.key == "codex" and name in ("agents", "skills"):
+        if platform.key in ("codex", "grok") and name in ("agents", "skills"):
             continue  # TOML/SKILL.md 是派生产物，靠源指纹检测，同步时重新生成
         for item in sorted(src_dir.rglob("*.md")):
             if item.name == ".gitkeep":
@@ -267,8 +268,8 @@ def find_changes(project: Path, platform: Platform) -> list[str]:
             rel = item.relative_to(src_dir)
             target = dst_base / rel
             if name == "agents" and platform.key == "opencode":
-                expected = convert_to_opencode(item.read_text(encoding="utf-8"))
-                expected = rewrite_refs(expected, platform)
+                expected = convert_agent_to_platform(item.read_text(encoding="utf-8"),
+                                                     platform)
                 if not target.exists() or target.read_text(encoding="utf-8") != expected:
                     changed.append(f"{name}/{rel}")
             else:
@@ -305,6 +306,7 @@ def do_sync(project: Path, platform: Platform):
     changes.append(sync_knowledge(project, platform))
     changes.append(sync_scaffold(project, platform))
     changes.append(sync_style_assets(project))
+    changes.append(sync_tools(project, platform))
 
     total = sum(c for c in changes if c > 0)
 
@@ -326,29 +328,17 @@ def sync_agents(project_path: Path, platform: Platform) -> int:
         print(f"  [i] {platform.label} 平台无 agents 目录（agents 即 skills）")
         return 0
     target.mkdir(parents=True, exist_ok=True)
-    if platform.key == "opencode":
-        # opencode agents 是转换产物（permission: 格式 + 引用改写），与 init 保持一致
+    if platform.key in ("opencode", "codex", "grok"):
+        # 转换产物（opencode: permission 格式 + 引用改写；codex: TOML；grok: agent Markdown），
+        # 转换逻辑单源见 platforms.convert_agent_to_platform（与 init.deploy_agents 一致）
         count = 0
         for item in sorted(AGENT_DIR.rglob("*.md")):
             if item.name == ".gitkeep":
                 continue
             rel = item.relative_to(AGENT_DIR)
-            dest = target / rel
-            content = convert_to_opencode(item.read_text(encoding="utf-8"))
-            content = rewrite_refs(content, platform)
-            if dest.exists() and dest.read_text(encoding="utf-8") == content:
-                continue
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_text(content, encoding="utf-8")
-            count += 1
-    elif platform.key == "codex":
-        # codex agents 是转换产物（.codex/agents/*.toml），与 init 保持一致
-        count = 0
-        for item in sorted(AGENT_DIR.rglob("*.md")):
-            if item.name == ".gitkeep":
-                continue
-            content = convert_to_codex(item.read_text(encoding="utf-8"), SKILL_HOME)
-            dest = target / (item.stem + ".toml")
+            dest = target / (item.stem + ".toml") if platform.key == "codex" else target / rel
+            content = convert_agent_to_platform(item.read_text(encoding="utf-8"),
+                                                platform, SKILL_HOME)
             if dest.exists() and dest.read_text(encoding="utf-8") == content:
                 continue
             dest.parent.mkdir(parents=True, exist_ok=True)
@@ -364,25 +354,15 @@ def sync_agents(project_path: Path, platform: Platform) -> int:
 
 
 def sync_skills(project_path: Path, platform: Platform) -> int:
-    if platform.key == "reasonix":
-        deploy_reasonix_skills(project_path, SKILL_HOME, platform)
+    if platform.key in ("reasonix", "zcode", "dsh", "openclaw"):
+        deploy_inline_skills(project_path, SKILL_HOME, platform)
         n = len(list(platform.skills_dir(project_path).rglob("SKILL.md")))
-        print(f"  [OK] reasonix skills: {n} 个 SKILL.md 已重新生成")
+        print(f"  [OK] {platform.key} skills: {n} 个 SKILL.md 已重新生成")
         return n
-    if platform.key == "zcode":
-        deploy_zcode_skills(project_path, SKILL_HOME, platform)
-        n = len(list(platform.skills_dir(project_path).rglob("SKILL.md")))
-        print(f"  [OK] zcode skills: {n} 个 SKILL.md 已重新生成")
-        return n
-    if platform.key == "openclaw":
-        deploy_openclaw_skills(project_path, SKILL_HOME, platform)
-        n = len(list(platform.skills_dir(project_path).rglob("SKILL.md")))
-        print(f"  [OK] openclaw skills: {n} 个 SKILL.md 已重新生成")
-        return n
-    if platform.key == "codex":
+    if platform.key in ("codex", "grok"):
         deploy_codex_skills(project_path, SKILL_HOME, platform)
         n = len(list(platform.skills_dir(project_path).rglob("SKILL.md")))
-        print(f"  [OK] codex skills: {n} 个 SKILL.md 已重新生成")
+        print(f"  [OK] {platform.key} skills: {n} 个 SKILL.md 已重新生成")
         return n
     target = platform.skills_dir(project_path)
     target.mkdir(parents=True, exist_ok=True)
@@ -428,6 +408,23 @@ def sync_knowledge(project_path: Path, platform: Platform) -> int:
     return count
 
 
+def sync_tools(project_path: Path, platform: Platform) -> int:
+    """同步正文检查脚本到 <平台>/tools/（源缺失则跳过，anti-ai 降级为模型肉眼）"""
+    count = 0
+    for name in ("check-prose.py", "check-chapter.py"):
+        src = SKILL_HOME / "tools" / name
+        if not src.exists():
+            continue
+        dst = project_path / platform.root / "tools" / name
+        if dst.exists() and dst.read_bytes() == src.read_bytes():
+            continue
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+        print(f"  [OK] 正文检查脚本: 已更新（{platform.root}/tools/{name}）")
+        count += 1
+    return count
+
+
 def _missing_style_assets(project: Path) -> list[Path]:
     """项目 settings/ 缺失的风格资产（与 sync_style_assets 的部署范围一致）。"""
     missing = []
@@ -460,10 +457,12 @@ def sync_scaffold(project: Path, platform: Platform) -> int:
     if not src.exists():
         return 0
     try:
-        from init import _rewrite_template_refs
+        from init import _GENERATED_SCAFFOLD, _rewrite_template_refs
     except ImportError:
+        _GENERATED_SCAFFOLD = None
         _rewrite_template_refs = None
-    generated = {"CLAUDE.md", "AGENTS.md", "AGENTS.codex.md", "AGENTS.openclaw.md"}
+    generated = _GENERATED_SCAFFOLD if _GENERATED_SCAFFOLD is not None \
+        else {"CLAUDE.md", "AGENTS.md", "AGENTS.codex.md"}
     status_tpl = src / ".agent" / "status.md"
     status_ver = None
     if status_tpl.is_file():
@@ -489,6 +488,7 @@ def sync_scaffold(project: Path, platform: Platform) -> int:
         if target.exists() and item.name not in generated:
             continue          # 非脚手架生成文件不覆盖（项目状态/任务模板等）
         if platform.key in ("codex", "openclaw") and item.name == "CLAUDE.md":
+            # codex/openclaw 项目无 CLAUDE.md（codex 只读 AGENTS.md；openclaw 子代理只注入 AGENTS.md）
             continue
         if item.name in ("AGENTS.codex.md", "AGENTS.openclaw.md"):
             continue          # 模板源，不直接复制进项目

@@ -24,13 +24,13 @@ OpenClaw 的技能格式（目录 + `SKILL.md`，frontmatter 只需 `name` + `de
 
 ### 方式一：让 AI 自己装
 在 OpenClaw / 云养虾对话里说：
-> **帮我安装 awesome-novel-skill，仓库在 https://github.com/modoojunko/awesome-novel-agent**
+> **帮我安装 awesome-novel-skill，仓库在 https://github.com/d1667018881/awesome-novel-agent-openclaw**
 
 AI 会克隆仓库并运行 `./install.sh openclaw`，把技能装到 `~/.openclaw/skills/awesome-novel/`。
 
 ### 方式二：手动安装（本地 OpenClaw）
 ```bash
-git clone https://github.com/modoojunko/awesome-novel-agent.git
+git clone https://github.com/d1667018881/awesome-novel-agent-openclaw.git
 cd awesome-novel-agent && ./install.sh openclaw
 ```
 

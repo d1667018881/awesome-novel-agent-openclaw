@@ -13,10 +13,13 @@
 """
 
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
+
+import yaml
 
 # 强制 UTF-8 输出，避免 Windows GBK 控制台报错（AGENTS.md:79）
 for _s in (sys.stdout, sys.stderr):
@@ -54,17 +57,20 @@ def test_detect():
     check("override=opencode", p.detect_platform(Path("d:/x"), "opencode").key == "opencode")
     check("override=claude", p.detect_platform(Path("d:/x"), "claude").key == "claude")
     check("override=zcode", p.detect_platform(Path("d:/x"), "zcode").key == "zcode")
-    check("override=openclaw", p.detect_platform(Path("d:/x"), "openclaw").key == "openclaw")
+    check("override=dsh", p.detect_platform(Path("d:/x"), "dsh").key == "dsh")
+    check("override=grok", p.detect_platform(Path("d:/x"), "grok").key == "grok")
     check("path reasonix",
           p.detect_platform(Path("d:/proj/.reasonix/skills/awesome-novel")).key == "reasonix")
     check("path opencode",
           p.detect_platform(Path("d:/proj/.config/opencode/skills/awesome-novel")).key == "opencode")
     check("path zcode",
           p.detect_platform(Path("d:/proj/.zcode/skills/awesome-novel")).key == "zcode")
-    check("path openclaw",
-          p.detect_platform(Path("d:/proj/.openclaw/skills/awesome-novel")).key == "openclaw")
+    check("path dsh",
+          p.detect_platform(Path("d:/proj/.dsh/skills/awesome-novel")).key == "dsh")
+    check("path grok",
+          p.detect_platform(Path("d:/proj/.grok/skills/awesome-novel")).key == "grok")
     check("default claude",
-          p.detect_platform(Path("d:/code/awesome-novel-skill")).key == "claude")
+          p.detect_platform(Path("d:/code/awesome-novel-agent")).key == "claude")
 
 
 def test_rewrite():
@@ -84,9 +90,13 @@ def test_rewrite():
     check("zcode 改写两处",
           out == "先 Read `.zcode/knowledge/anti-ai.md` 和 `.zcode/memory/volume-memory.md`",
           out)
-    out = p.rewrite_refs(text, p.PLATFORMS["openclaw"])
-    check("openclaw 改写两处",
-          out == "先 Read `.openclaw/knowledge/anti-ai.md` 和 `.openclaw/memory/volume-memory.md`",
+    out = p.rewrite_refs(text, p.PLATFORMS["dsh"])
+    check("dsh 改写两处",
+          out == "先 Read `.dsh/knowledge/anti-ai.md` 和 `.dsh/memory/volume-memory.md`",
+          out)
+    out = p.rewrite_refs(text, p.PLATFORMS["grok"])
+    check("grok 改写两处",
+          out == "先 Read `.grok/knowledge/anti-ai.md` 和 `.grok/memory/volume-memory.md`",
           out)
 
 
@@ -105,19 +115,27 @@ def test_config():
     check("zcode agents=None", p.PLATFORMS["zcode"].agents_dir(Path("P")) is None)
     check("zcode skills 路径",
           p.PLATFORMS["zcode"].skills_dir(Path("P")) == Path("P") / ".zcode" / "skills")
-    check("openclaw agents=None", p.PLATFORMS["openclaw"].agents_dir(Path("P")) is None)
-    check("openclaw skills 路径",
-          p.PLATFORMS["openclaw"].skills_dir(Path("P")) == Path("P") / ".openclaw" / "skills")
+    check("dsh agents=None", p.PLATFORMS["dsh"].agents_dir(Path("P")) is None)
+    check("dsh skills 路径",
+          p.PLATFORMS["dsh"].skills_dir(Path("P")) == Path("P") / ".dsh" / "skills")
+    check("grok agents 路径",
+          p.PLATFORMS["grok"].agents_dir(Path("P")) == Path("P") / ".grok" / "agents")
+    check("grok skills 路径",
+          p.PLATFORMS["grok"].skills_dir(Path("P")) == Path("P") / ".grok" / "skills")
     check("unknown key 抛错", _raises(p.platform_from_key, "bad-key"))
     check("检测优先显式覆盖", p.detect_platform(Path("d:/x/.reasonix/skills"), "claude").key == "claude")
     check("检测 codex 路径",
           p.detect_platform(Path("d:/x/.codex/skills/awesome-novel")).key == "codex")
     check("检测 zcode 路径",
           p.detect_platform(Path("d:/x/.zcode/skills/awesome-novel")).key == "zcode")
-    check("检测 openclaw 路径",
-          p.detect_platform(Path("d:/x/.openclaw/skills/awesome-novel")).key == "openclaw")
+    check("检测 dsh 路径",
+          p.detect_platform(Path("d:/x/.dsh/skills/awesome-novel")).key == "dsh")
+    check("检测 grok 路径",
+          p.detect_platform(Path("d:/x/.grok/skills/awesome-novel")).key == "grok")
     check("检测 claude 路径含 codex 子串回落 claude",
           p.detect_platform(Path("/Users/codex-dev/.claude/skills/awesome-novel")).key == "claude")
+    check("检测 claude 路径含 grok 子串回落 claude",
+          p.detect_platform(Path("/Users/grok-dev/.claude/skills/awesome-novel")).key == "claude")
 
 
 def test_yaml_precheck():
@@ -141,8 +159,8 @@ def test_yaml_precheck():
               _raises_system_exit(p.ensure_yaml, p.PLATFORMS["reasonix"]))
         check("缺 yaml 时 zcode 报错",
               _raises_system_exit(p.ensure_yaml, p.PLATFORMS["zcode"]))
-        check("缺 yaml 时 openclaw 报错",
-              _raises_system_exit(p.ensure_yaml, p.PLATFORMS["openclaw"]))
+        check("缺 yaml 时 grok 报错",
+              _raises_system_exit(p.ensure_yaml, p.PLATFORMS["grok"]))
     finally:
         builtins.__import__ = real_import
 
@@ -182,6 +200,62 @@ def test_check_yaml():
         check("有 yaml exit 0", r.returncode == 0, (r.stdout + r.stderr)[-200:])
 
 
+def _fake_version_repo(tmp: Path, version: str, drift: dict) -> None:
+    """迷你仓库：VERSION 权威 + 四处副本（check-version.py 测试注入 NOVEL_REPO_ROOT 用）。
+
+    drift: {相对路径: 漂移版本号}，构造单处不一致场景。
+    """
+    (tmp / "VERSION").write_text(f"v{version}\n", encoding="utf-8")
+    (tmp / "ARCHITECTURE.md").write_text(f"# x\n\n> 当前版本：v{version}\n", encoding="utf-8")
+    (tmp / "skill.json").write_text(f'{{"version": "{version}"}}\n', encoding="utf-8")
+    tpl = tmp / "templates" / ".agent"
+    tpl.mkdir(parents=True)
+    (tpl / "status.md").write_text(f"- **skill_version:** {version}\n", encoding="utf-8")
+    tools = tmp / "tools"
+    tools.mkdir(parents=True)
+    (tools / "init.py").write_text(f'status = """- **skill_version:** {version}"""\n',
+                                   encoding="utf-8")
+    for name, ver in drift.items():
+        if name == "ARCHITECTURE.md":
+            (tmp / name).write_text(f"# x\n\n> 当前版本：v{ver}\n", encoding="utf-8")
+        elif name == "skill.json":
+            (tmp / name).write_text(f'{{"version": "{ver}"}}\n', encoding="utf-8")
+        elif name == "templates/.agent/status.md":
+            (tmp / name).write_text(f"- **skill_version:** {ver}\n", encoding="utf-8")
+        elif name == "tools/init.py":
+            (tmp / name).write_text(f'status = """- **skill_version:** {ver}"""\n',
+                                    encoding="utf-8")
+
+
+def test_check_version():
+    """版本一致性守卫自身测试（arch-review 工程债：check 脚本缺测试覆盖）。"""
+    print("[unit] check-version.py 一致性")
+    with tempfile.TemporaryDirectory() as td:
+        _fake_version_repo(Path(td), "4.16.0", {})
+        env = dict(os.environ, NOVEL_REPO_ROOT=td)
+        r = run([sys.executable, str(TOOLS / "check-version.py")], env=env)
+        check("五处一致 exit 0", r.returncode == 0, (r.stdout + r.stderr)[-200:])
+        check("输出含通过文案", "版本号一致" in r.stdout, r.stdout[-200:])
+    for name, ver, expect in [
+        ("ARCHITECTURE.md", "4.13.0", "ARCHITECTURE.md"),
+        ("skill.json", "1.0.0", "skill.json"),
+        ("templates/.agent/status.md", "4.13.0", "templates/.agent/status.md"),
+        ("tools/init.py", "4.13.0", "tools/init.py"),
+    ]:
+        with tempfile.TemporaryDirectory() as td:
+            _fake_version_repo(Path(td), "4.16.0", {name: ver})
+            env = dict(os.environ, NOVEL_REPO_ROOT=td)
+            r = run([sys.executable, str(TOOLS / "check-version.py")], env=env)
+            check(f"漂移 {name} exit 1", r.returncode == 1, str(r.returncode))
+            check(f"漂移 {name} 报错含标签", expect in (r.stdout + r.stderr),
+                  (r.stdout + r.stderr)[-200:])
+    with tempfile.TemporaryDirectory() as td:
+        (Path(td) / "VERSION").write_text("abc\n", encoding="utf-8")
+        env = dict(os.environ, NOVEL_REPO_ROOT=td)
+        r = run([sys.executable, str(TOOLS / "check-version.py")], env=env)
+        check("VERSION 格式非法 exit 1", r.returncode == 1, str(r.returncode))
+
+
 def _raises(fn, *a) -> bool:
     try:
         fn(*a)
@@ -208,7 +282,7 @@ def test_init_layout():
         "reasonix": (["skills", "knowledge", "memory"], [".claude"]),
         "codex":    (["agents", "knowledge", "memory"], [".claude", ".opencode", ".reasonix"]),
         "zcode":    (["skills", "knowledge", "memory"], [".claude", ".opencode", ".reasonix"]),
-        "openclaw": (["skills", "knowledge", "memory"], [".claude", ".opencode", ".reasonix"]),
+        "grok":     (["agents", "knowledge", "memory"], [".claude", ".opencode", ".reasonix"]),
     }
     for key, (subs, absents) in expect_map.items():
         with tempfile.TemporaryDirectory() as td:
@@ -218,6 +292,23 @@ def test_init_layout():
             for sub in subs:
                 check(f"{key} 存在 .{key}/{sub}", (tmp / f".{key}" / sub).exists())
             check(f"{key} 存在 novel-samples/（蒸馏样本目录）", (tmp / "novel-samples").exists())
+            t = tmp / f".{key}" / "tools" / "check-prose.py"
+            check(f"{key} 部署 tools/check-prose.py", t.exists())
+            if t.exists():
+                check(f"{key} check-prose.py 内容与源一致",
+                      t.read_text(encoding="utf-8") ==
+                      (TOOLS / "check-prose.py").read_text(encoding="utf-8"))
+            t2 = tmp / f".{key}" / "tools" / "check-chapter.py"
+            check(f"{key} 部署 tools/check-chapter.py", t2.exists())
+            if t2.exists():
+                check(f"{key} check-chapter.py 内容与源一致",
+                      t2.read_text(encoding="utf-8") ==
+                      (TOOLS / "check-chapter.py").read_text(encoding="utf-8"))
+            aa = tmp / f".{key}" / "knowledge" / "anti-ai.md"
+            check(f"{key} anti-ai.md 合并结构热源定律",
+                  aa.exists() and "结构热源定律" in aa.read_text(encoding="utf-8"))
+            for sb in ("detect-battles.md", "prose-regressions.txt", "locked-lines.txt"):
+                check(f"{key} 生成 sandbox/{sb}", (tmp / "sandbox" / sb).exists())
             for a in absents:
                 check(f"{key} 无 {a}", not (tmp / a).exists())
 
@@ -271,50 +362,6 @@ def test_init_layout():
                 (tmp / ".zcode/skills").rglob("SKILL.md"))
         )
         check("zcode 全部 skill 无 .claude 残留", ".claude" not in all_skills)
-
-    # openclaw 11 个 skill（与 reasonix/zcode 同构：agents 即 skills）
-    with tempfile.TemporaryDirectory() as td:
-        tmp = Path(td)
-        init_project(tmp, "openclaw")
-        names = ["novel-agent", "writer", "volume-planner", "chapter-planner",
-                 "prompt-crafter", "anti-ai", "reader", "updater", "style-distiller",
-                 "memory-recording", "roleplay-sandbox"]  # 与 deploy_openclaw_skills 的 11 个 skill 名对应（spec 契约）
-        for n in names:
-            check(f"openclaw skill {n}", (tmp / ".openclaw/skills" / n / "SKILL.md").exists())
-        w = (tmp / ".openclaw/skills/writer/SKILL.md").read_text(encoding="utf-8")
-        fm = w.split("---", 2)[1]
-        check("openclaw writer frontmatter 仅 name+description",
-              "name: writer" in fm and "description" in fm
-              and "tools:" not in fm and "allowed-tools" not in fm, fm[:200])
-        check("openclaw writer 引用改写",
-              ".openclaw/knowledge/" in w and ".claude/knowledge/" not in w)
-        check("openclaw writer 注入调度硬约束",
-              "调度权限硬约束" in w and "sessions_spawn" in w, "writer 应注入禁止派生约束")
-        nv = (tmp / ".openclaw/skills/novel-agent/SKILL.md").read_text(encoding="utf-8")
-        check("openclaw novel-agent 调度适配",
-              "sessions_spawn" in nv and "sessions_yield" in nv
-              and ".openclaw/skills/" in nv and "OpenClaw 调度适配" in nv)
-        check("openclaw novel-agent 不注入禁调",
-              "调度权限硬约束" not in nv, "novel-agent 是唯一调度者，不应注入禁调")
-        check("openclaw novel-agent 无 .claude 残留", ".claude" not in nv)
-        all_skills = "".join(
-            f.read_text(encoding="utf-8") for f in sorted(
-                (tmp / ".openclaw/skills").rglob("SKILL.md"))
-        )
-        check("openclaw 全部 skill 无 .claude 残留", ".claude" not in all_skills)
-
-    # openclaw AGENTS.md 模板（OpenClaw 子代理上下文只注入 AGENTS.md）与无 CLAUDE.md
-    with tempfile.TemporaryDirectory() as td:
-        tmp = Path(td)
-        init_project(tmp, "openclaw")
-        ag = (tmp / "AGENTS.md").read_text(encoding="utf-8")
-        check("openclaw AGENTS.md 指向 .openclaw/skills",
-              ".opencode/agents" not in ag and ".openclaw/skills/" in ag, ag[:200])
-        check("openclaw AGENTS.md 含 sessions_spawn 协议",
-              "sessions_spawn" in ag and "order" in ag, ag[:400])
-        check("openclaw 无 CLAUDE.md", not (tmp / "CLAUDE.md").exists())
-        check("openclaw 无 AGENTS.openclaw.md 模板副本",
-              not (tmp / "AGENTS.openclaw.md").exists())
 
     # zcode AGENTS.md / CLAUDE.md 模板改写
     with tempfile.TemporaryDirectory() as td:
@@ -396,6 +443,101 @@ def test_init_layout():
                     break
             check("codex TOML tomllib 可解析", parse_ok, detail if not parse_ok else "")
 
+    # dsh skill 部署（11 个 SKILL.md，frontmatter 只 name/description）
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        init_project(tmp, "dsh")
+        names = ["novel-agent", "writer", "volume-planner", "chapter-planner",
+                 "prompt-crafter", "anti-ai", "reader", "updater", "style-distiller",
+                 "memory-recording", "roleplay-sandbox"]  # 与 deploy_dsh_skills 的 11 个 skill 名对应（spec 契约）
+        for n in names:
+            check(f"dsh skill {n}", (tmp / ".dsh/skills" / n / "SKILL.md").exists())
+        check("dsh 部署 tools/check-prose.py",
+              (tmp / ".dsh/tools/check-prose.py").exists())
+        w = (tmp / ".dsh/skills/writer/SKILL.md").read_text(encoding="utf-8")
+        fm = w.split("---", 2)[1]
+        check("dsh writer frontmatter 只 name/description",
+              "name: writer" in fm and "description:" in fm
+              and "allowed-tools" not in fm and "tools:" not in fm
+              and "runAs" not in fm, fm[:200])
+        check("dsh writer 引用改写",
+              ".dsh/knowledge/" in w and ".claude/knowledge/" not in w)
+        nv = (tmp / ".dsh/skills/novel-agent/SKILL.md").read_text(encoding="utf-8")
+        check("dsh novel-agent 调度适配",
+              "subagent" in nv and ".dsh/skills/" in nv and "DeepSeek Harness 调度适配" in nv)
+        check("dsh novel-agent 无 .claude 残留", ".claude" not in nv)
+        all_skills = "".join(
+            f.read_text(encoding="utf-8") for f in sorted(
+                (tmp / ".dsh/skills").rglob("SKILL.md"))
+        )
+        check("dsh 全部 skill 无 .claude 残留", ".claude" not in all_skills)
+
+    # dsh AGENTS.md / CLAUDE.md 模板改写
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        init_project(tmp, "dsh")
+        ag = (tmp / "AGENTS.md").read_text(encoding="utf-8")
+        check("dsh AGENTS.md 指向 .dsh/skills",
+              ".opencode/agents" not in ag and ".dsh/skills/" in ag, ag[:200])
+        cl = (tmp / "CLAUDE.md").read_text(encoding="utf-8")
+        check("dsh CLAUDE.md 无 .claude/agents",
+              ".claude/agents" not in cl and ".dsh/skills/" in cl, cl[:200])
+
+    # grok agent Markdown + skill + 模板
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        init_project(tmp, "grok")
+        n = len(list((tmp / ".grok/agents").glob("*.md")))
+        check("grok agents 数量=9", n == 9, f"实际 {n}")
+        w = (tmp / ".grok/agents/writer.md").read_text(encoding="utf-8")
+        fm = w.split("---", 2)[1]
+        fm_data = yaml.safe_load(fm)
+        check("grok writer frontmatter",
+              "name: writer" in fm and "description:" in fm
+              and "read_file" in fm and "write" in fm, fm[:400])
+        check("grok 子 agent 禁止且未授权 Agent",
+              "Agent" not in fm_data.get("tools", [])
+              and fm_data.get("disallowedTools") == ["Agent"], fm[:400])
+        check("grok 子 agent frontmatter 不使用模型调用名",
+              "spawn_subagent" not in fm_data.get("tools", [])
+              and "spawn_subagent" not in fm_data.get("disallowedTools", []), fm[:400])
+        check("grok writer 引用改写",
+              ".grok/knowledge/" in w and ".claude/knowledge/" not in w)
+        check("grok writer SOP 内联", "执行 SOP：writing-execution.md" in w)
+        check("grok 子 agent 注入调度硬约束",
+              "调度权限硬约束" in w and "spawn_subagent" in w)
+        nv = (tmp / ".grok/agents/novel-agent.md").read_text(encoding="utf-8")
+        nfm = nv.split("---", 2)[1]
+        nfm_data = yaml.safe_load(nfm)
+        check("grok novel-agent 调度适配",
+              "spawn_subagent" in nv and ".grok/agents/" in nv
+              and "Grok Build 调度适配" in nv)
+        check("grok novel-agent frontmatter 启用 Agent 指令",
+              "Agent" in nfm_data.get("tools", [])
+              and "spawn_subagent" not in nfm_data.get("tools", [])
+              and "disallowedTools" not in nfm_data, nfm[:300])
+        check("grok novel-agent 不注入禁调",
+              "调度权限硬约束" not in nv, "novel-agent 是唯一调度者，不应注入禁调")
+        all_md = "".join(
+            f.read_text(encoding="utf-8") for f in sorted((tmp / ".grok/agents").glob("*.md"))
+        )
+        check("grok 全部 agent 无 .claude 残留", ".claude" not in all_md)
+        aa = (tmp / ".grok/agents/anti-ai.md").read_text(encoding="utf-8")
+        aafm = aa.split("---", 2)[1]
+        check("grok anti-ai 保留 shell",
+              "run_terminal_command" in aafm, aafm[:300])
+        check("grok skill roleplay-sandbox",
+              (tmp / ".grok/skills/roleplay-sandbox/SKILL.md").exists())
+        check("grok skill memory-recording",
+              (tmp / ".grok/skills/memory-recording/SKILL.md").exists())
+        ag = (tmp / "AGENTS.md").read_text(encoding="utf-8")
+        check("grok AGENTS.md 指向 .grok/agents", ".grok/agents/" in ag, ag[:200])
+        cl = (tmp / "CLAUDE.md").read_text(encoding="utf-8")
+        check("grok CLAUDE.md 无 .claude/agents",
+              ".claude/agents" not in cl and ".grok/agents/" in cl, cl[:200])
+        check("grok 部署 tools/check-prose.py",
+              (tmp / ".grok/tools/check-prose.py").exists())
+
 
 # ---------------- E2E sync ----------------
 
@@ -455,15 +597,71 @@ def test_sync():
 
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
-        init_project(tmp, "openclaw")
+        init_project(tmp, "dsh")
         r = run([sys.executable, str(TOOLS / "sync-project.py"), str(tmp),
-                 "--platform", "openclaw"], cwd=str(tmp))
-        check("openclaw sync exit 0", r.returncode == 0, (r.stdout + r.stderr)[-400:])
-        w = (tmp / ".openclaw/skills/writer/SKILL.md").read_text(encoding="utf-8")
-        check("openclaw sync 保持 frontmatter 格式",
-              "name: writer" in w and "tools:" not in w.split("---", 2)[1]
-              and ".openclaw/knowledge/" in w and ".claude/" not in w)
-        check("openclaw sync 无 .claude", not (tmp / ".claude").exists())
+                 "--platform", "dsh"], cwd=str(tmp))
+        check("dsh sync exit 0", r.returncode == 0, (r.stdout + r.stderr)[-400:])
+        check("dsh sync 保持 skill", (tmp / ".dsh/skills/writer/SKILL.md").exists())
+        w = (tmp / ".dsh/skills/writer/SKILL.md").read_text(encoding="utf-8")
+        check("dsh sync 保持 frontmatter 格式",
+              "allowed-tools:" not in w.split("---", 2)[1]
+              and ".dsh/knowledge/" in w and ".claude/" not in w)
+        check("dsh sync 无 .claude", not (tmp / ".claude").exists())
+
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        init_project(tmp, "grok")
+        r = run([sys.executable, str(TOOLS / "sync-project.py"), str(tmp),
+                 "--platform", "grok"], cwd=str(tmp))
+        check("grok sync exit 0", r.returncode == 0, (r.stdout + r.stderr)[-400:])
+        w = (tmp / ".grok/agents/writer.md").read_text(encoding="utf-8")
+        fm_data = yaml.safe_load(w.split("---", 2)[1])
+        check("grok sync 保持 agent Markdown",
+              fm_data.get("name") == "writer"
+              and ".grok/knowledge/" in w and ".claude/" not in w)
+        check("grok sync 子 agent 禁止且未授权 Agent",
+              "Agent" not in fm_data.get("tools", [])
+              and fm_data.get("disallowedTools") == ["Agent"], str(fm_data))
+        check("grok sync 保持 skill",
+              (tmp / ".grok/skills/roleplay-sandbox/SKILL.md").exists())
+        check("grok sync 无 .claude", not (tmp / ".claude").exists())
+
+    # tools/check-prose.py 同步恢复（模拟升级：脚本被删/改旧，sync 重新部署）
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        init_project(tmp, "zcode")
+        f = tmp / ".zcode" / "tools" / "check-prose.py"
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text("# 旧版占位\n", encoding="utf-8")
+        fc = tmp / ".zcode" / "tools" / "check-chapter.py"
+        fc.write_text("# 旧版占位\n", encoding="utf-8")
+        r = run([sys.executable, str(TOOLS / "sync-project.py"), str(tmp),
+                 "--platform", "zcode"], cwd=str(tmp))
+        check("zcode sync exit 0（脚本恢复）", r.returncode == 0, (r.stdout + r.stderr)[-400:])
+        check("zcode sync 恢复 check-prose.py",
+              f.exists() and f.read_text(encoding="utf-8") ==
+              (TOOLS / "check-prose.py").read_text(encoding="utf-8"))
+        check("zcode sync 恢复 check-chapter.py",
+              fc.exists() and fc.read_text(encoding="utf-8") ==
+              (TOOLS / "check-chapter.py").read_text(encoding="utf-8"))
+
+    # 指纹覆盖 tools/check-prose.py：脚本源变更后 --check 应报有更新
+    with tempfile.TemporaryDirectory() as td:
+        tmp = Path(td)
+        init_project(tmp, "claude")
+        r = run([sys.executable, str(TOOLS / "sync-project.py"), str(tmp),
+                 "--platform", "claude"], cwd=str(tmp))
+        check("指纹基线 sync exit 0", r.returncode == 0, (r.stdout + r.stderr)[-400:])
+        src = TOOLS / "check-prose.py"
+        bak = src.read_text(encoding="utf-8")
+        src.write_text(bak + "\n# fingerprint probe\n", encoding="utf-8")
+        try:
+            r2 = run([sys.executable, str(TOOLS / "sync-project.py"), str(tmp),
+                      "--platform", "claude", "--check"], cwd=str(tmp))
+            check("check-prose.py 变更后 --check exit 1", r2.returncode == 1,
+                  (r2.stdout + r2.stderr)[-200:])
+        finally:
+            src.write_text(bak, encoding="utf-8")
 
     # --check：无指纹首次 → exit 1
     with tempfile.TemporaryDirectory() as td:
@@ -562,6 +760,36 @@ def test_install_fresh_home():
         check("fresh home agents 存在", (dest / "agents").is_dir())
 
 
+def test_install_ps1_fresh_home():
+    """E2E：install.ps1 全新 HOME 首次安装（Linux pwsh 冒烟，语义等价 Windows）。
+
+    pwsh 缺失（本地开发机）时跳过；CI ubuntu runner 自带 pwsh 会真实执行，
+    覆盖 install.ps1 的路径/拷贝/门槛流程（arch-review 工程债：ps1 无测试）。
+    """
+    pwsh = shutil.which("pwsh")
+    if not pwsh:
+        print("[e2e] install.ps1 冒烟（跳过：无 pwsh，CI ubuntu 会执行）")
+        return
+    print("[e2e] install.ps1 全新 HOME 首次安装（pwsh）")
+    with tempfile.TemporaryDirectory() as td:
+        fake_home = Path(td) / "home"
+        fake_bin = Path(td) / "bin"
+        fake_bin.mkdir()
+        os.symlink(sys.executable, fake_bin / "python")   # ps1 用 Get-Command python
+        env = dict(os.environ)
+        env["USERPROFILE"] = str(fake_home)               # ps1 用 $env:USERPROFILE
+        env["PATH"] = str(fake_bin) + os.pathsep + env.get("PATH", "")
+        r = run([pwsh, "-NoProfile", "-File", str(TOOLS.parent / "install.ps1"), "claude-code"],
+                cwd=str(TOOLS.parent), env=env)
+        check("ps1 fresh home install exit 0", r.returncode == 0, (r.stdout + r.stderr)[-400:])
+        check("ps1 输出含安装完成", "安装完成" in r.stdout, r.stdout[-300:])
+        # install.ps1 用 Join-Path 拼接：Windows 落 $HOME\.claude\skills\awesome-novel，
+        # Linux pwsh 落 $USERPROFILE/.claude/skills/awesome-novel（真实嵌套目录）
+        dest = fake_home / ".claude" / "skills" / "awesome-novel"
+        check("ps1 fresh home SKILL.md 存在", (dest / "SKILL.md").exists())
+        check("ps1 fresh home agents 存在", (dest / "agents").is_dir())
+
+
 def test_install_no_home():
     """P2 回归：HOME 未设置时安装脚本在创建任何目录前即拒绝（报路径异常）。"""
     print("[e2e] install.sh 无 HOME 拒绝安装")
@@ -641,11 +869,13 @@ def main():
         ("test_yaml_precheck", test_yaml_precheck),
         ("test_check_python", test_check_python),
         ("test_check_yaml", test_check_yaml),
+        ("test_check_version", test_check_version),
         ("test_init_layout", test_init_layout),
         ("test_sync", test_sync),
         ("test_style_seed_guard", test_style_seed_guard),
         ("test_sync_style_missing_and_scaffold", test_sync_style_missing_and_scaffold),
         ("test_install_fresh_home", test_install_fresh_home),
+        ("test_install_ps1_fresh_home", test_install_ps1_fresh_home),
         ("test_install_no_home", test_install_no_home),
         ("test_install_python_gate", test_install_python_gate),
         ("test_install_yaml_gate", test_install_yaml_gate),

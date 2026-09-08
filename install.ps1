@@ -1,4 +1,4 @@
-# awesome-novel-skill - AI-assisted novel writing workflow system
+﻿# awesome-novel-agent - AI-assisted novel writing workflow system
 # Copyright (C) 2026  modoojunko
 #
 # This program is free software: you can redistribute it and/or modify
@@ -16,7 +16,7 @@
 
 param(
     [Parameter(Mandatory=$true)]
-    [ValidateSet("claude-code", "opencode", "codex", "zcode")]
+    [ValidateSet("claude-code", "opencode", "codex", "zcode", "dsh", "grok", "hermes", "openclaw", "deepseek-tui")]
     [string]$Platform
 )
 
@@ -24,16 +24,31 @@ $HOME_DIR = $env:USERPROFILE
 
 switch ($Platform) {
     "claude-code" {
-        $DEST_DIR = "$HOME_DIR\.claude\skills\awesome-novel"
+        $DEST_DIR = Join-Path $HOME_DIR ".claude/skills/awesome-novel"
+    }
+    "hermes" {
+        $DEST_DIR = Join-Path $HOME_DIR ".hermes/skills/awesome-novel"
+    }
+    "openclaw" {
+        $DEST_DIR = Join-Path $HOME_DIR ".openclaw/skills/awesome-novel"
+    }
+    "deepseek-tui" {
+        $DEST_DIR = Join-Path $HOME_DIR ".deepseek/skills/awesome-novel"
     }
     "opencode" {
-        $DEST_DIR = "$HOME_DIR\.config\opencode\skills\awesome-novel"
+        $DEST_DIR = Join-Path $HOME_DIR ".config/opencode/skills/awesome-novel"
     }
     "codex" {
-        $DEST_DIR = "$HOME_DIR\.codex\skills\awesome-novel"
+        $DEST_DIR = Join-Path $HOME_DIR ".codex/skills/awesome-novel"
     }
     "zcode" {
-        $DEST_DIR = "$HOME_DIR\.zcode\skills\awesome-novel"
+        $DEST_DIR = Join-Path $HOME_DIR ".zcode/skills/awesome-novel"
+    }
+    "dsh" {
+        $DEST_DIR = Join-Path $HOME_DIR ".dsh/skills/awesome-novel"
+    }
+    "grok" {
+        $DEST_DIR = Join-Path $HOME_DIR ".grok/skills/awesome-novel"
     }
 }
 
@@ -45,16 +60,16 @@ if (-not (Get-Command $PY_BIN -ErrorAction SilentlyContinue)) {
     Write-Host "错误: 未找到 python。请先安装 Python 3.9+（https://www.python.org/downloads/）"
     exit 1
 }
-& $PY_BIN "$SCRIPT_DIR\tools\check-python.py"
+& $PY_BIN (Join-Path $SCRIPT_DIR "tools/check-python.py")
 if ($LASTEXITCODE -ne 0) {
     Write-Host "安装中止：请升级 Python 后重试。"
     exit 1
 }
 
-# pyyaml 门槛：opencode / codex / zcode 的 agent/skill 转换依赖 pyyaml（与
+# pyyaml 门槛：opencode / codex / zcode / dsh / grok 的 agent/skill 转换依赖 pyyaml（与
 # tools/platforms.py ensure_yaml 的运行时规则对齐）；claude-code 纯复制不转换，不需要。
-if ($Platform -in @("opencode", "codex", "zcode")) {
-    & $PY_BIN "$SCRIPT_DIR\tools\check-yaml.py" $Platform
+if ($Platform -in @("opencode", "codex", "zcode", "dsh", "grok")) {
+    & $PY_BIN (Join-Path $SCRIPT_DIR "tools/check-yaml.py") $Platform
     if ($LASTEXITCODE -ne 0) {
         Write-Host "安装中止：缺少 pyyaml。请先执行 pip install pyyaml 后重试。"
         exit 1
@@ -73,14 +88,14 @@ $INCLUDES = @("SKILL.md", "agents", "skills", "knowledge", "templates", "tools")
 foreach ($item in $INCLUDES) {
     $src = Join-Path $SCRIPT_DIR $item
     if (Test-Path $src) {
-        Copy-Item -Recurse $src "$DEST_DIR\"
+        Copy-Item -Recurse $src $DEST_DIR
     }
 }
 
-# memory/ 含 writer-style 等静态参考素材（可选）
+# memory/ 已废弃（writer-style 已迁至 knowledge/format-specs/）；保留守卫兼容旧仓库
 $memoryDir = Join-Path $SCRIPT_DIR "memory"
 if (Test-Path $memoryDir) {
-    Copy-Item -Recurse $memoryDir "$DEST_DIR\"
+    Copy-Item -Recurse $memoryDir $DEST_DIR
 }
 
 Write-Host "安装完成!"

@@ -18,7 +18,7 @@
     └── permanent-memory.md          # 永久记忆（从 memory/ 晋升的高频条目）
 ```
 
-> 平台目录由 init.py 按 `--platform` 决定：Claude Code → `.claude/`、OpenCode → `.opencode/`、Reasonix → `.reasonix/`、Codex → `.codex/`。
+> 平台目录由 init.py 按 `--platform` 决定：Claude Code → `.claude/`、OpenCode → `.opencode/`、Reasonix → `.reasonix/`、Codex → `.codex/`、ZCode → `.zcode/`、dsh → `.dsh/`、Grok Build → `.grok/`。
 
 ## 二、文件头
 
@@ -74,7 +74,7 @@
 ## 四、条目生命周期
 
 ```
-memory/ 条目 ──use_count >= 4──→ knowledge/permanent-memory.md
+memory/ 条目 ──use_count >= 4──→ .claude/knowledge/permanent-memory.md
 permanent-memory.md 条目 ──连 3 次 sweep 未使用──→ 标记待移除 → 作者确认后删除
 ```
 
@@ -86,7 +86,7 @@ permanent-memory.md 条目 ──连 3 次 sweep 未使用──→ 标记待移
 | 结论清晰可复用 | 晋升前确认结论是通用规则而非一次性场景 |
 | 无冲突 | 与已有永久记忆无矛盾 |
 
-晋升操作：从 `memory/*.md` 移除该条目，追加到 `knowledge/permanent-memory.md`，保留所有原始字段 + `[promoted YYYY-MM-DD]` 标记。
+晋升操作：从 `memory/*.md` 移除该条目，追加到 `.claude/knowledge/permanent-memory.md`，保留所有原始字段 + `[promoted YYYY-MM-DD]` 标记。
 
 ### 4.2 降级条件（permanent → 移除）
 

@@ -50,9 +50,8 @@ def test_schema_templates():
 def test_retire_clean():
     for bad in ("tools/distill-style.py", "tools/compare-style.py", "tools/mix-style.py"):
         check(f"{bad} 已删", not (REPO / bad).exists())
-    static = (REPO / ".github/workflows/static.yml").read_text(encoding="utf-8")
-    check("CI 无 jieba", "jieba" not in static)
-    check("CI 运行 test_style_rules", "test_style_rules.py" in static)
+    # 本仓库为纯技能包，已移除 .github/workflows（Pages CI 部署宣传页），
+    # 原 static.yml 的 CI 内容检查（jieba/test_style_rules）随之失效，不再校验
     req = (REPO / "tools/requirements.txt").read_text(encoding="utf-8")
     check("requirements 无 jieba", "jieba" not in req)
     init = (REPO / "tools/init.py").read_text(encoding="utf-8")

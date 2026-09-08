@@ -1,8 +1,8 @@
-# awesome-novel-skill 项目贡献说明
+# awesome-novel-agent 项目贡献说明
 
 ## 1. 项目简介
 
-awesome-novel-skill 是一款免费开源的 AI 小说创作助手工具，基于 DeepSeek TUI、Claude Code、Hermes、OpenClaw 等 AI 终端工具运行，遵循 GPLv3 开源协议。项目旨在降低小说创作门槛，为创作者提供世界观搭建、角色塑造、章节大纲、正文撰写、文风优化、伏笔追踪等一站式小说创作能力，个人用户永久免费使用，商业使用需获得作者官方授权。
+awesome-novel-agent 是一款免费开源的 AI 小说创作助手工具，基于 DeepSeek TUI、Claude Code、Hermes、OpenClaw 等 AI 终端工具运行，遵循 GPLv3 开源协议。项目旨在降低小说创作门槛，为创作者提供世界观搭建、角色塑造、章节大纲、正文撰写、文风优化、伏笔追踪等一站式小说创作能力，个人用户永久免费使用，商业使用需获得作者官方授权。
 
 本项目依靠社区驱动维护，欢迎各类技术人员、网文创作者、爱好者参与贡献，无需高深编程能力，文案优化、素材补充、bug 反馈均为有效贡献方式。
 
@@ -69,7 +69,7 @@ awesome-novel-skill 是一款免费开源的 AI 小说创作助手工具，基�
 #### 3.2.1 代码开发与优化
 
 - **脚本优化**：迭代 install.sh、install.ps1 安装脚本，修复安装报错、优化安装流程；
-- **功能迭代**：优化 7-agent 协作流程、SOLO 全自动模式，完善 agent 定义和 skill SOP；
+- **功能迭代**：优化 9-agent 协作流程、SOLO 全自动模式，完善 agent 定义和 skill SOP；
 - **兼容性适配**：适配更多 AI 终端工具，优化 DeepSeek TUI 兼容性，移除冗余模型依赖；
 - **算法优化**：升级 AI 去机器腔检测、伏笔钩子追踪、剧情节奏检测算法。
 
@@ -82,7 +82,7 @@ awesome-novel-skill 是一款免费开源的 AI 小说创作助手工具，基�
 #### 3.2.3 周边生态开发
 
 - 拓展衍生工具：开发小说项目迁移工具、文风分析可视化工具；
-- 优化资源目录：完善 agents/（agent 定义）、knowledge/（格式规范）、memory/（反 AI 规则），拓展辅助创作功能。
+- 优化资源目录：完善 agents/（agent 定义）、knowledge/（格式规范、反 AI 规则、创作方法论），拓展辅助创作功能。
 
 ## 4. 提交规范
 

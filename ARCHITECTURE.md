@@ -1,7 +1,7 @@
-# awesome-novel-skill 架构文档
+# awesome-novel-agent 架构文档
 
 > 面向开发者理解实现细节。面向使用者的内容见 [README.md](./README.md)。
-> 当前版本：v4.13.0
+> 当前版本：v4.24.1
 
 ---
 
@@ -9,7 +9,7 @@
 
 ### 1.1 总体：状态驱动的 ReAct 循环
 
-核心架构是**状态驱动循环**。每个 agent（含 novel-agent 与所有子 agent）都按 ReAct 模式运行：`OBSERVE → THINK → ACT → VERIFY → LOOP`。
+核心架构是**状态驱动循环**。每个 agent（含 novel-agent 与所有子 agent）都按 ReAct 模式运行：`OBSERVE → THINK → ACT → VERIFY → LOOP`（唯一例外：`reader` 声明 `react: false`——评审是一次性阅读评价，不走状态驱动循环，见 `agents/reader.md` 的 Invocation Integration 说明）。
 
 - **OBSERVE**：从文件系统重建状态，不依赖上一次运行的上下文缓存（Context Isolation）
 - **THINK**：读 `.agent/status.md` 的 `phase` 字段，判断当前该做什么、该谁做
@@ -61,6 +61,8 @@ Skill 入口（主 agent 加载 SKILL.md 后）先做项目状态检测，之后
 
 ### 1.5 调度架构
 
+> order 类型清单以 `skills/novel-dispatch.md` 为唯一权威，本图是主线摘要；逐分支判定细则见 `agents/novel-agent.md` 的 THINK 树。
+
 ```
 主 AI（加载 @novel-agent）
   │
@@ -68,17 +70,21 @@ Skill 入口（主 agent 加载 SKILL.md 后）先做项目状态检测，之后
   ├── 写 order 文件到 .agent/task/{type}-order.md（只含输入/输出路径，不含执行步骤）
   ├── 通过 Agent 工具调度子 agent
   │     ├── setup   → updater          （setting-update-order.md）
-  │     ├── setup   → style-distiller  （style-distill-order.md，作者提供风格样本时）
+  │     ├── setup   → style-distiller  （style-distill-order.md，文风设定决策流程选蒸馏时）
+  │     ├── 任意 phase → style-distiller（style-distill-order.md，作者说"修改文风设定"等触发）
   │     ├── outline → volume-planner   （volume-plan-order.md）
   │     ├── outline → chapter-planner  （chapter-plan-order.md）
   │     ├── draft   → prompt-crafter   （prompt-craft-order.md）
   │     ├── draft   → writer           （writing-order.md）
   │     ├── anti-ai → anti-ai          （anti-ai-order.md）
+  │     ├── anti-ai FAIL → writer      （writing-order.md，rewrite_of + round + violations，round<3）
   │     ├── review  → reader           （reader-review-order.md，可选）
-  │     ├── archive → updater          （archive-order.md / memory-sweep-order.md）
+  │     ├── archive → updater          （archive-order.md）
+  │     ├── 归档后重写某章 → updater    （rollback-order.md，撤销该章归档，status 回 outline）
+  │     ├── 卷完成 → updater           （memory-sweep-order.md，记忆兜底）
   │     └── # 卡冻结：归档后无风格增量更新
   ├── 子 agent 完成后将 order 覆盖为 status: DONE
-  └── 检测到 order 标记 DONE → 推进下一阶段
+  └── 检测到 order 标记 DONE → 推进下一阶段（setup 例外：setting-update-order DONE 后需作者确认设定，再推进 phase）
 ```
 
 **关键规则：**
@@ -152,8 +158,8 @@ Skill 入口（主 agent 加载 SKILL.md 后）先做项目状态检测，之后
 │   ├── task/             # order 文件（临时，完成后 status→DONE 留存待删）
 │   ├── archiving/        # 归档 checkpoint（{chapter}.done，防重放重复）
 │   └── {chapter}-draft-ai.md  # AI 原版快照（审计基线，归档后保留，靠 .done 标记区分过期）
-├── .claude/ 或 .opencode/ 或 .zcode/
-│   ├── agents/           # Agent 定义（init.py 部署；zcode 无 agents，agents 即 .zcode/skills/）
+├── .claude/ 或 .opencode/ 或 .zcode/ 或 .dsh/
+│   ├── agents/           # Agent 定义（init.py 部署；zcode/dsh 无 agents，agents 即 .zcode/skills/ / .dsh/skills/）
 │   ├── knowledge/        # 反 AI 规则 / 文风偏好 / 场景方法论 / 永久记忆 / 格式规范
 │   └── memory/           # 动态写作记忆（volume/chapter/prompt/writing）
 ```
@@ -192,6 +198,8 @@ tools/           # init.py（初始化）、sync-project.py（同步更新）
 - **OpenCode**：init.py 同时部署到 `.opencode/agents/`，OpenCode 自动发现 `@novel-agent` 等
 - **Codex**：init.py 部署 9 个自定义 agent 为 `.codex/agents/*.toml`（TOML 转换产物，引用改写为 `.codex/knowledge|memory`），独立工具为 `.codex/skills/<name>/SKILL.md`；novel-agent 用 `spawn_agent` 调度子 agent
 - **ZCode**：init.py 部署 9 个 agent 为 `.zcode/skills/<name>/SKILL.md`（skill 转换产物，引用改写为 `.zcode/knowledge|memory`；ZCode 无项目级 agents 目录，agents 即 skills，与 Reasonix 同构）；novel-agent 用 `Agent` 工具按 skill 名调度子 agent
+- **dsh（DeepSeek Harness）**：init.py 部署 9 个 agent 为 `.dsh/skills/<name>/SKILL.md`（skill 转换产物，frontmatter 只保留 dsh 识别的 `name`/`description`，引用改写为 `.dsh/knowledge|memory`；dsh 无项目级 agents 目录，agents 即 skills，与 ZCode 同构）；novel-agent 用 `subagent` 工具调度子 agent（prompt 要求子 agent 先 `skill(name=...)` 加载自身指令）
+- **Grok Build**：init.py 部署 9 个自定义 agent 为 `.grok/agents/*.md`（Grok 原生发现路径，frontmatter 映射为 Grok 工具名，SOP 内联，引用改写为 `.grok/knowledge|memory`），独立工具为 `.grok/skills/<name>/SKILL.md`；novel-agent 用 `spawn_subagent` 调度子 agent（必须在主会话运行，Grok 子代理深度上限为 1）
 - **安装**：`install.sh` / `install.ps1` 将 skill 装到用户级 skills 目录
 
 ---
@@ -296,9 +304,9 @@ anti-ai 是独立子 agent，输入 `archives/*.draft.md`，输出 `archives/*.a
 ```
 Phase 1  扫描   按 Gate A-F 分类标记 AI 味位置
          A 禁用词 / B 句式套路 / C 心理描写 / D 节奏 / E 对话 / F 结尾
-Phase 2  诊断   6 项量化指标打分，定级（轻 / 中 / 重）
+Phase 2  诊断   机器初筛（check-prose.py，可降级）+ 6 项量化指标打分，定级（轻 / 中 / 重）
 Phase 3  清除   按定级范围逐 Gate 修改，多轮收敛（同段连续两轮无改动跳过，全文上限 3 轮）
-Phase 4  报告   字数变化 + 修改统计 + 前后对比
+Phase 4  报告   字数变化 + 修改统计 + 前后对比 + 机器复跑核验
 ```
 
 - **误杀防护**：修改前读 `knowledge/anti-ai/boundary-cases.md` 做豁免判定，命中则跳过标 `[SKIP: 误杀防护]`
@@ -311,10 +319,10 @@ Phase 4  报告   字数变化 + 修改统计 + 前后对比
 
 | 工具 | 用途 | 何时运行 |
 |------|------|---------|
-| `tools/init.py` | 项目初始化（选题材 → 建骨架 → 部署 agent/知识 → 建记忆桩 → 生成 CLAUDE.md/AGENTS.md → 写 status.md），共 9 步 | 全新项目 / 2.x 迁移后 |
+| `tools/init.py` | 项目初始化（选题材 → 建骨架 → 部署 agent/skills/知识/工具脚本 → 建记忆桩 → 生成 CLAUDE.md/AGENTS.md → 写 status.md） | 全新项目 / 2.x 迁移后 |
 | `tools/sync-project.py` | 将 skill 仓库更新同步进已有项目（`--check` 只检测） | 入口检测到指纹过期时 |
 | `install.sh` / `install.ps1` | 安装 skill 到用户级目录 | 首次安装 |
-| `.github/workflows/static.yml` | CI 静态检查 | 推送时 |
+
 
 ---
 

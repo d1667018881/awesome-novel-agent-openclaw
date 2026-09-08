@@ -7,7 +7,7 @@ description: 和 AI 协作写小说的工作流系统。9 个 agent 协作完成
 
 和 AI 一起写小说。本 skill 负责项目状态检测、新项目初始化、旧版项目自动迁移，完成后将控制权交给 novel-agent。
 
-**唤起方式：** 用户在项目目录输入 `/awesome-novel`（Claude Code / OpenCode 直接输入；Codex 输入 `/use awesome-novel`；或说"帮我写本小说"）即进入下方检测流程。新目录会先询问作者，确认后运行 `init.py` 在本地初始化小说工作空间。
+**唤起方式：** 用户在项目目录输入 `/awesome-novel`（Claude Code / OpenCode / Grok Build 直接输入；Codex 输入 `/use awesome-novel`；或说"帮我写本小说"）即进入下方检测流程。新目录会先询问作者，确认后运行 `init.py` 在本地初始化小说工作空间。
 
 ## OpenCode 集成说明
 
@@ -35,15 +35,33 @@ description: 和 AI 协作写小说的工作流系统。9 个 agent 协作完成
 
 **调度机制：** novel-agent 写 order 文件到 `.agent/task/`（`status: pending`）→ 用 `Agent` 工具调度子 agent（子 agent 名 = `.zcode/skills/` 下的 skill 名）→ 子 agent 读取 order 执行 → 完成后将 order 覆盖为 `status: DONE` 后退回。order 文件协议与其余平台完全一致。
 
+## dsh 集成说明
+
+本 skill 也支持 DeepSeek Harness（dsh，DeepSeek 官方的开源 agent harness）。dsh 的 skill 约定（目录 + `SKILL.md`，frontmatter 只认 `name`/`description`）与 Claude Code 同源，天然兼容；但 dsh 无项目级 agents 目录（subagent 是运行时能力），agents 即 skills。skill 本体**用户级安装**到 `~/.dsh/skills/awesome-novel/`；`init.py --platform dsh` 初始化小说项目时，把 9 个 agent 部署为项目级 `.dsh/skills/<name>/SKILL.md`（与 ZCode 同构，另含 memory-recording、roleplay-sandbox 独立工具，共 11 个 skill；`<项目根>/.dsh/skills/` 是 dsh 的项目级 skill 根，自动发现且优先级最高）：
+- novel-agent — 总指挥（入口调度者，由 dsh 按 name/description 自动路由，无 `@` 语法）
+- writer、volume-planner、chapter-planner 等 — 子 agent（subagent skill，由 novel-agent 用 `subagent` 工具调度）
+
+**调度机制：** novel-agent 写 order 文件到 `.agent/task/`（`status: pending`）→ 用 `subagent` 工具调度子 agent（prompt 中要求子 agent 先调用 `skill(name="<子agent名>")` 加载自身指令；子 agent 名 = `.dsh/skills/` 下的 skill 名）→ 子 agent 读取 order 执行 → 完成后将 order 覆盖为 `status: DONE` 后退回。order 文件协议与其余平台完全一致。
+
+## Grok Build 集成说明
+
+本 skill 也支持 [Grok Build](https://docs.x.ai/build/overview)（SpaceXAI 的编码 agent TUI）。skill 本体**用户级安装**到 `~/.grok/skills/awesome-novel/`；`init.py --platform grok` 初始化小说项目时，把 9 个自定义 agent 部署为项目级 `.grok/agents/*.md`（Grok 原生 agent 发现路径，含 `name`/`description`/`tools`）：
+- novel-agent — 总指挥（必须在主会话运行；Grok 子代理深度上限为 1，禁止把 novel-agent 当 subagent 调度）
+- writer、volume-planner、chapter-planner 等 — 子 agent（由 novel-agent 用 `spawn_subagent` 按 `subagent_type` 调度）
+- **独立工具** — `memory-recording`、`roleplay-sandbox` 部署为 `.grok/skills/<name>/SKILL.md`
+
+**调度机制：** novel-agent 写 order 文件到 `.agent/task/`（`status: pending`）→ 用 `spawn_subagent` 调度子 agent（`subagent_type` = `.grok/agents/*.md` 的 name，`isolation: none`）→ 子 agent 读取 order 执行 → 完成后将 order 覆盖为 `status: DONE` 后退回。order 文件协议与其余平台完全一致。
+
 ## OpenClaw 集成说明
 
-本 skill 也支持 OpenClaw（含云养虾 ArkClaw 等云端 OpenClaw）。OpenClaw 的 skill 约定（目录 + `SKILL.md`）与 Claude Code 同源，天然兼容；但 OpenClaw 无项目级 agents 目录，agents 即 skills，且子代理上下文只注入 `AGENTS.md` + `TOOLS.md`。skill 本体**用户级安装**到 `~/.openclaw/skills/awesome-novel/`（或云养虾的 skill 目录）；`init.py --platform openclaw` 初始化小说项目时，把 9 个 agent + 2 个独立工具部署为项目级 `.openclaw/skills/<name>/SKILL.md`（共 11 个），并生成 OpenClaw 专属 `AGENTS.md`（子代理角色清单 + order 协议）：
+本 skill 也支持 [OpenClaw](https://openclaw.ai)（俗称"小龙虾"，含云养虾 ArkClaw 等云端 OpenClaw）。OpenClaw 的 skill 约定（目录 + `SKILL.md`，frontmatter 只认 `name`/`description`）与 Claude Code 同源，天然兼容；但 OpenClaw 无项目级 agents 目录，agents 即 skills，且子代理上下文只注入 `AGENTS.md` + `TOOLS.md`。skill 本体**用户级安装**到 `~/.openclaw/skills/awesome-novel/`（或云养虾的 skill 目录）；`init.py --platform openclaw` 初始化小说项目时，把 9 个 agent + 2 个独立工具部署为项目级 `.openclaw/skills/<name>/SKILL.md`（共 11 个），并生成 OpenClaw 专属 `AGENTS.md`（子代理角色清单 + order 协议）：
 - novel-agent — 总指挥（入口调度者，由主代理加载 `AGENTS.md` 与 `.openclaw/skills/novel-agent/SKILL.md` 后扮演）
 - writer、volume-planner、chapter-planner 等 — 子代理（subagent skill，由 novel-agent 用 `sessions_spawn` 按 skill 名调度）
+- **独立工具** — `memory-recording`、`roleplay-sandbox` 部署为 `.openclaw/skills/<name>/SKILL.md`
 
 **调度机制：** novel-agent 写 order 文件到 `.agent/task/`（`status: pending`）→ 用 `sessions_spawn` 调度子代理（task 首行 `[Subagent Task]`，含操作手册路径 `.openclaw/skills/<名>/SKILL.md` + order 文件路径）→ 子代理先 Read 操作手册再执行 → 完成后将 order 覆盖为 `status: DONE` 后退回 → novel-agent 用 `sessions_yield` 等待完成事件（基于推送，禁止轮询）。order 文件协议与其余平台完全一致。
 
-**技能发现：** 子代理 skill 不依赖 OpenClaw 自动发现/注入（子代理被 spawn 后主动 Read 自己的 SKILL.md），因此无需 `skills.load.extraDirs` 配置；若希望主代理也能直接发现，可把 `~/.openclaw/skills/` 或项目 `.openclaw/skills/` 加入技能目录即可。
+**技能发现：** 子代理 skill 不依赖 OpenClaw 自动发现/注入（子代理被 spawn 后主动 Read 自己的 SKILL.md），因此无需 `skills.load.extraDirs` 配置；入口 skill 由 `~/.openclaw/skills/` 自动发现（或云养虾的 skill 目录）。
 
 ## 检测流程 — 严格按此执行，禁止跳过
 
@@ -70,7 +88,7 @@ description: 和 AI 协作写小说的工作流系统。9 个 agent 协作完成
 - 确认后必须运行 `init.py`，禁止手动创建目录结构替代
 - **禁止在 skill 安装目录（含 `skills/awesome-novel` 路径）内运行 `init.py`** — 此目录是技能仓库，不是小说项目
 - 如果当前目录是 skill 安装目录，应提示作者切换到目标目录后再执行
-- `init.py` 执行完毕后，确认 `.agent/status.md` 与平台部署目录已生成（Claude Code → `.claude/agents/`；OpenCode → `.opencode/agents/`；Reasonix → `.reasonix/skills/`；Codex → `.codex/agents/`；ZCode → `.zcode/skills/`；OpenClaw → `.openclaw/skills/`），方可进入 novel-agent
+- `init.py` 执行完毕后，确认 `.agent/status.md` 与平台部署目录已生成（Claude Code → `.claude/agents/`；OpenCode → `.opencode/agents/`；Reasonix → `.reasonix/skills/`；Codex → `.codex/agents/`；ZCode → `.zcode/skills/`；dsh → `.dsh/skills/`；Grok Build → `.grok/agents/`；OpenClaw → `.openclaw/skills/`），方可进入 novel-agent
 - 如果 `init.py` 报错，必须先修复问题重新执行，不允许绕过
 
 ## 初始化 — 先询问，确认后执行，不可跳过
@@ -80,15 +98,15 @@ description: 和 AI 协作写小说的工作流系统。9 个 agent 协作完成
 python <本 skill 安装目录>/tools/init.py [project-path] [--genre <编号>]
 ```
 
-`<本 skill 安装目录>` 即本 SKILL.md 所在目录（如 `~/.claude/skills/awesome-novel/`、`~/.config/opencode/skills/awesome-novel/`、`~/.codex/skills/awesome-novel/`、`~/.zcode/skills/awesome-novel/`）。AI 用绝对路径调用，避免在项目目录找不到 `tools/init.py`。
+`<本 skill 安装目录>` 即本 SKILL.md 所在目录（如 `~/.claude/skills/awesome-novel/`、`~/.config/opencode/skills/awesome-novel/`、`~/.codex/skills/awesome-novel/`、`~/.zcode/skills/awesome-novel/`、`~/.dsh/skills/awesome-novel/`、`~/.grok/skills/awesome-novel/`、`~/.openclaw/skills/awesome-novel/`）。AI 用绝对路径调用，避免在项目目录找不到 `tools/init.py`。
 
 **禁止以任何理由跳过 init.py：** 手动创建目录、复制模板、直接调用 agent 都属于违规行为。`init.py` 是初始化入口，必须执行且完整运行。
 
 `init.py` 会：
 1. 选题材
 2. 创建项目骨架（settings/、volumes/、chapters/、prompts/、archives/）
-3. 部署 agent/skill 到当前平台约定目录（Claude Code → `.claude/agents/`；OpenCode → `.opencode/agents/`；Reasonix / ZCode / OpenClaw 不部署 agents，agents 即 `.reasonix/skills/` / `.zcode/skills/` / `.openclaw/skills/`；Codex → `.codex/agents/*.toml`）
-4. 按题材继承反 AI 规则和文风偏好到平台 knowledge 目录（`.claude/knowledge/` / `.opencode/knowledge/` / `.reasonix/knowledge/` / `.codex/knowledge/` / `.zcode/knowledge/` / `.openclaw/knowledge/`）
+3. 部署 agent/skill 到当前平台约定目录（Claude Code → `.claude/agents/`；OpenCode → `.opencode/agents/`；Reasonix / ZCode / dsh 不部署 agents，agents 即 `.reasonix/skills/` / `.zcode/skills/` / `.dsh/skills/`；Codex → `.codex/agents/*.toml`；Grok Build → `.grok/agents/*.md`）
+4. 按题材继承反 AI 规则和文风偏好到平台 knowledge 目录（`.claude/knowledge/` / `.opencode/knowledge/` / `.reasonix/knowledge/` / `.codex/knowledge/` / `.zcode/knowledge/` / `.dsh/knowledge/` / `.grok/knowledge/`）
 5. 按题材继承格式规范、题材案例到平台 knowledge 目录
 6. 创建空白的写作记忆文件（平台 memory 目录）
 7. 创建永久记忆占位文件（平台 knowledge 目录）
@@ -108,9 +126,12 @@ python <本 skill 安装目录>/tools/init.py [project-path] [--genre <编号>]
 3. novel-agent 通过 **Agent 工具调用 updater**
 4. **updater 读取 order**，写入 `settings/world-setting.md`、`settings/genre-setting.md`、`settings/character-setting/*.md` 等设定文件
 5. updater 将 order 覆盖为 `status: DONE` 并结束
-6. **novel-agent 确认 order 标记 DONE**，推进 phase → outline，进入卷纲规划
+6. **novel-agent 确认 order 标记 DONE**（只代表写入完成），展示已写入的设定摘要给作者确认：文件清单（对照 order 的 outputs 逐项列出）+ 世界观/题材/角色/文风要点，参照 `docs/tutorial.md` 3.8 完成报告样式，面向作者用日常语言，结尾话术："设定已写入 settings/。哪里不对直接说；没问题就说'可以'，我开始规划卷纲。"
+7. **作者明确确认（"可以/没问题/就这样"；或说"之前已确认过"）→ 才可推进 phase → outline**，进入卷纲规划。作者要求修改 → novel-agent 写 setting-update-order（order 内嵌修改意见）→ 调 updater → 改完重新展示确认，循环受重试/断路器约束，连续修改仍不满意 → 暂停，请作者直接给最终文案。作者回复模糊（"差不多""你看着办""都行"）→ 追问具体哪项不确定；未明确前一律视为未确认。**未确认前不得推进 phase。**（作者说"你全权写"全自动模式 → 展示摘要后视为已确认直接推进）
 
 **权限规则：** novel-agent 不得直接写 `settings/` 下的文件，设定写入必须通过 updater 的 setting-update 模式完成。
+
+**幂等约定：** phase=setup 且 setting-update-order 已 DONE（outputs 存在非空）→ 视为「已写入、待作者确认」，中断重启后直接展示摘要等确认——不新增状态字段、不重派 updater、不推进 phase；order 缺失但 outputs 已存在 → 同样直接进入展示确认。
 
 ## 自动迁移（2.x → 3.0）
 
@@ -254,31 +275,44 @@ cp old/prompts/*.txt prompts/ 2>/dev/null
 ├── .agent/
 │   ├── status.md         # 进度追踪
 │   └── task/             # agent 间 order 文件
-├── .claude/             # Claude Code 用（平台一，五选一）
+├── .claude/             # Claude Code 用（平台一，八选一）
 │   ├── agents/          # Agent 定义
 │   ├── knowledge/       # 反 AI 规则、文风偏好、永久记忆、格式规范
 │   └── memory/          # 写作动态记忆
-├── .opencode/           # OpenCode 用（平台二，五选一）
+├── .opencode/           # OpenCode 用（平台二，八选一）
 │   ├── agents/          # Agent 定义
 │   ├── knowledge/       # 反 AI 规则、文风偏好、永久记忆、格式规范
 │   └── memory/          # 写作动态记忆
-├── .reasonix/           # Reasonix 用（平台三，五选一）
+├── .reasonix/           # Reasonix 用（平台三，八选一）
     ├── skills/          # 11 个 SKILL.md（agents 即 skills）
     ├── knowledge/       # 反 AI 规则、文风偏好、永久记忆、格式规范
     └── memory/          # 写作动态记忆
-├── .codex/              # Codex 用（平台四，五选一）
+├── .codex/              # Codex 用（平台四，八选一）
     ├── agents/          # 9 个自定义 agent（TOML）
     ├── skills/          # 独立交互工具（memory-recording、roleplay-sandbox）
     ├── knowledge/       # 反 AI 规则、文风偏好、永久记忆、格式规范
     └── memory/          # 写作动态记忆
-└── .zcode/              # ZCode 用（平台五，五选一）
+├── .zcode/              # ZCode 用（平台五，八选一）
     ├── skills/          # 11 个 SKILL.md（agents 即 skills）
     ├── knowledge/       # 反 AI 规则、文风偏好、永久记忆、格式规范
     └── memory/          # 写作动态记忆
+├── .dsh/                # DeepSeek Harness 用（平台六，八选一）
+├── .grok/               # Grok Build 用（平台七，八选一）
+└── .openclaw/           # OpenClaw 用（平台八，八选一）
+    ├── skills/          # 11 个 SKILL.md（agents 即 skills）
+    ├── knowledge/       # 反 AI 规则、文风偏好、永久记忆、格式规范
+    └── memory/          # 写作动态记忆
+└── .grok/               # Grok Build 用（平台七，八选一）
+    ├── agents/          # 9 个自定义 agent（Markdown）
+    ├── skills/          # 独立交互工具（memory-recording、roleplay-sandbox）
+    ├── knowledge/       # 反 AI 规则、文风偏好、永久记忆、格式规范
+    └── memory/          # 写作动态记忆
 ```
-> 实际项目只生成六选一的一套平台目录（由 `init.py --platform` 决定），`.claude/` / `.opencode/` / `.reasonix/` / `.codex/` / `.zcode/` / `.openclaw/` 不会同时存在。
+> 实际项目只生成八选一的一套平台目录（由 `init.py --platform` 决定），`.claude/` / `.opencode/` / `.reasonix/` / `.codex/` / `.zcode/` / `.dsh/` / `.grok/` / `.openclaw/` 不会同时存在。
 
 ## Agent 协作架构
+
+> 下图是主线概览；完整 order 类型清单与判定细则以 `skills/novel-dispatch.md`（唯一权威）+ `agents/novel-agent.md`（执行细则）为准。
 
 ```
 novel-agent（总指挥）
@@ -292,13 +326,15 @@ novel-agent（总指挥）
   └─ 归档完成 → 卷完成判定 → 下一章 / 卷 N+1 / 完本
 ```
 
-各 agent 定义在平台约定目录（Claude Code → `.claude/agents/`；OpenCode → `.opencode/agents/`；Reasonix / ZCode → `.reasonix/skills/` / `.zcode/skills/`；Codex → `.codex/agents/*.toml`），skill SOP 在 `skills/`。agent 间通过 `.agent/task/*-order.md` 文件通信。
+各 agent 定义在平台约定目录（Claude Code → `.claude/agents/`；OpenCode → `.opencode/agents/`；Reasonix / ZCode / dsh / OpenClaw → `.reasonix/skills/` / `.zcode/skills/` / `.dsh/skills/` / `.openclaw/skills/`；Codex → `.codex/agents/*.toml`；Grok Build → `.grok/agents/*.md`），skill SOP 在 `skills/`。agent 间通过 `.agent/task/*-order.md` 文件通信。
 
 **可选工具：** 剧情推演沙盘（`skills/roleplay-sandbox.md`）是独立的交互式工具，不在 agent 调度链中。作者卡剧情时主动调用，产出推演记录（`sandbox/`）供编写章纲时参考。
 
 **调度规则：** novel-agent 是唯一调度者，只写 order 文件 + 调用子 agent。所有内容创作（卷纲/章纲/提示词/正文）、设定维护、归档更新均由子 agent 完成，novel-agent 不得越权代劳。子 agent 完成任务后把 order 覆盖为 `status: DONE`（不删除文件），novel-agent 检测到 DONE 即确认完成。
 
-**重要：novel-agent 是顶层入口，通过 `@novel-agent`（Claude Code / OpenCode / Codex）或 ZCode 的 skill 自动发现加载进主 agent，禁止通过 Agent 工具将 novel-agent 作为 subagent 调度。** 主 agent 加载 novel-agent 定义后即扮演总指挥角色，拥有完整的 Agent 工具权限来调度子 agent。如果 novel-agent 被作为 subagent 派出，它将失去 Agent 工具调用能力，导致调度链断裂。
+**作者确认关卡（人铸灵魂，AI 行笔墨）：** 设定、卷纲、章纲 order DONE 后必须停下，向作者展示摘要、等作者确认后才进入下一步——未确认不写下一个 order，作者说"继续/推进"只推进到下一个确认点即停。正文流水线（提示词→正文→去AI味→验收→归档）无需逐步确认，归档后再问作者。详见 `skills/novel-dispatch.md`。
+
+**重要：novel-agent 是顶层入口，通过 `@novel-agent`（Claude Code / OpenCode / Codex）或 ZCode / Grok Build 的 skill 自动发现加载进主 agent，禁止通过 Agent / spawn_subagent 将 novel-agent 作为 subagent 调度。** 主 agent 加载 novel-agent 定义后即扮演总指挥角色，拥有完整的调度权限。如果 novel-agent 被作为 subagent 派出，它将失去再派子 agent 的能力（Grok 深度上限为 1），导致调度链断裂。
 
 ## 工具契约
 
@@ -311,4 +347,3 @@ novel-agent（总指挥）
 | **Edit** | 写 settings/、平台目录下的内容文件 | 子 agent（非 novel-agent） |
 | **Glob** | 扫描文件 | 所有 agent |
 | **Grep** | 搜索内容 | 所有 agent |
- | 所有 agent |
